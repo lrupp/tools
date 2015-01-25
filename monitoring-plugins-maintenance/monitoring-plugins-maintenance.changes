@@ -1,0 +1,57 @@
+-------------------------------------------------------------------
+Tue Dec  2 17:53:42 UTC 2014 - lars@linux-schulserver.de
+
+- update to 2.2:
+  + add --ignore option to completely ignore the results of the 
+    maintenance check and return OK in any case. Useful if you 
+    just need the other data available in your monitoring system
+
+-------------------------------------------------------------------
+Mon Oct 20 12:13:26 UTC 2014 - lars@linux-schulserver.de
+
+- update to 2.1:
+  + improve check for broken dates in maintenance file and print 
+    out an informal message before exiting with UNKNOWN
+  + better error handling if maintenance data is broken
+
+-------------------------------------------------------------------
+Wed Jul 30 19:17:16 UTC 2014 - lars@linux-schulserver.de
+
+- Renamed package to monitoring-plugins-maintenance
+
+-------------------------------------------------------------------
+Thu Jul 17 13:12:33 UTC 2014 - lars@linux-schulserver.de
+
+- update to 2.0:
+  + allow to define a budget_date : unless this date is reached, 
+    we will not announce a warning or critical exit code 
+  + allow more fields for serial and inventory
+
+-------------------------------------------------------------------
+Thu Jan 17 21:04:53 UTC 2013 - cfarrell@suse.com
+
+- license update: BSD-3-Clause
+  See the check_maintenance file
+
+-------------------------------------------------------------------
+Thu Jun 28 18:17:13 UTC 2012 - lars@linux-schulserver.de
+
+- fix license
+
+-------------------------------------------------------------------
+Tue Mar 16 11:28:46 UTC 2010 - lars@linux-schulserver.de
+
+- update to 1.7:
+  + improved message for outdated service
+  + allow a new field for Vendor Names
+
+-------------------------------------------------------------------
+Wed Feb 17 15:50:23 UTC 2010 - lars@linux-schulserver.de
+
+- always print last service date as comment
+
+-------------------------------------------------------------------
+Wed Feb 17 13:50:57 UTC 2010 - lars@linux-schulserver.de
+
+- initial version 1.0 
+
