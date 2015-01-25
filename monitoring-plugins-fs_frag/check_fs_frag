@@ -34,7 +34,6 @@ VERSION='1.0'
 MTAB='/etc/mtab'
 UTILS='/usr/lib/nagios/plugins/utils.sh'
 BC='/usr/bin/bc'
-SUDO='/usr/bin/sudo'
 WARNING=10
 CRITICAL=20
 
