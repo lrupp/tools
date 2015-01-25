@@ -1,0 +1,179 @@
+#!/bin/bash
+#
+# Copyright (c) 2015, Lars Vogdt <lars@linux-schulserver.de>
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its contributors
+#    may be used to endorse or promote products derived from this software without
+#    specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+
+VERSION='1.0'
+MTAB='/etc/mtab'
+UTILS='/usr/lib/nagios/plugins/utils.sh'
+BC='/usr/bin/bc'
+SUDO='/usr/bin/sudo'
+WARNING=10
+CRITICAL=20
+
+if [ -r "$UTILS" ]; then
+    . "$UTILS"
+else
+    echo "UNKOWN: could not read $UTILS"
+    exit 3
+fi
+RES=$STATE_OK
+
+print_help(){
+    echo "Usage: $(basename "$0") -w <level> -c <level> [OPTIONS]"
+    echo "       checks fragementation of local file systems (xfs, ext2, ext3, ext4)"
+    echo
+    echo "       -w <level> : warning level (default: $WARNING) in percent"
+    echo "       -c <level> : critical level (default: $CRITICAL) in percent"
+	echo
+    echo "       -m <file>  : use <file> as mtab file (default: $MTAB)"
+	echo "       -b <file>  : path to bc (default: $BC)"
+	echo "       -h         : this help"
+	echo "       -v         : version number"
+	echo
+    print_revision "$(basename "$0")" "$VERSION"
+    echo
+    support
+    exit $STATE_OK
+}
+
+compare(){
+    value=$1
+    level=$2
+    res=$(echo "$value > $level" | "$BC");
+    return $res
+}
+
+check_fs_values(){
+    fs=$1
+    value=$2
+    if ! compare $value $WARNING; then
+        OUTPUT="Warn: fs $fs is $value% defragmented; $OUTPUT"
+        if [ $RES -lt $STATE_WARNING ]; then
+            RES=$STATE_WARNING
+        fi
+    elif ! compare $value $CRITICAL; then
+        OUTPUT="Crit: fs $fs is $value% defragmented; $OUTPUT"
+        RES=$STATE_CRITICAL
+    else
+        OUTPUT="Ok: fs $fs is $value% defragmented; $OUTPUT"
+        if [ $RES -lt $STATE_OK ]; then
+            RES=$STATE_OK;
+        fi
+    fi
+}
+
+
+while getopts "hvw:c:" OPTION; do
+    case $OPTION in
+        h) print_help
+           exit "$STATE_OK"
+        ;;
+        v) print_revision "$(basename "$0")" "$VERSION"
+           exit "$STATE_OK"
+        ;;
+        w) WARNING="$OPTARG"
+        ;;
+        c) CRITICAL="$OPTARG"
+        ;;
+        m) MTAB="$OPTARG"
+        ;;
+        b) BC="$OPTARG"
+        ;;
+    esac
+done
+
+if [ ! -x "$BC" ]; then
+    echo "UNKOWN: could not execute $BC"
+	print_help
+    exit $STATE_UNKOWN
+fi
+
+if [ ! -r "$MTAB" ]; then
+    echo "UNKOWN: could not read $MTAB"
+	print_help
+    exit $STATE_UNKOWN
+fi
+
+if [[ ! $WARNING =~ ^-?[0-9]+$ ]]; then
+    echo "UNKOWN: $WARNING for warning must be an integer"
+	print_help
+    exit $STATE_UNKOWN
+fi
+
+if [[ ! $CRITICAL =~ ^-?[0-9]+$ ]]; then
+    echo "UNKOWN: $CRITICAL for critical must be an integer"
+	print_help
+    exit $STATE_UNKOWN
+fi
+
+if [ $WARNING -ge $CRITICAL ]; then
+    echo "UNKOWN: critical value $CRITICAL must be greater than warning value $WARNING"
+	print_help
+    exit $STATE_UNKOWN
+fi
+
+unset LANG;
+
+while read LINE ; do
+    ARRY=($LINE);
+    FIELDNAME=$(echo ${ARRY[0]} | sed 's/^[^A-Za-z_]/_/; s/[^A-Za-z0-9_]/_/g');
+    case ${ARRY[1]} in
+        xfs)
+            FRAG=$(xfs_db -f -c frag -r ${ARRY[0]} | sed 's/.*fragmentation factor \(.*\)%.*/\1/');
+            check_fs_values $FIELDNAME $FRAG
+            PERFDATA="$PERFDATA '$FIELDNAME.frag'=$FRAG%;$WARNING;$CRITICAL;;"
+        ;;
+        ext*)
+            FRAG=$(e2fsck -fn ${ARRY[0]} 2>/dev/null | tail -n 1 | sed 's/.*(\(.*\)% non-contiguous.*/\1/');
+            check_fs_values $FIELDNAME $FRAG
+            PERFDATA="$PERFDATA '$FIELDNAME.frag'=$FRAG%;$WARNING;$CRITICAL;;"
+        ;;
+    esac
+done < <(awk '{print $1 " " $3}' "$MTAB")
+
+case $RES in
+    $STATE_CRITICAL)
+        echo -n "CRITICAL: $OUTPUT"
+    ;;
+    $STATE_WARNING)
+        echo -n "WARNING: $OUTPUT"
+    ;;
+    $STATE_OK)
+        echo -n "All OK: $OUTPUT"
+    ;;
+    *)
+        echo -n "UNKNOWN: $OUTPUT"
+    ;;
+esac
+
+echo "|$PERFDATA"
+exit $RES
+
