@@ -21,7 +21,7 @@ Name:           monitoring-plugins-fs_frag
 Version:        1.o
 Release:        0
 Summary:        Check xfs and ext filesystems for fragmentation
-License:        BSD-3.0-Clause
+License:        BSD-2-Clause
 Group:          System/Monitoring
 Url:            https://github.com/lrupp/tools/tree/master/monitoring-plugins-fs_frag
 Source0:        check_fs_frag
