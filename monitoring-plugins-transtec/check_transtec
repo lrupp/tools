@@ -1,0 +1,221 @@
+#!/bin/sh
+# 
+# Copyright by Lars Vogdt 2012
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# 
+
+ECHO='/bin/echo'
+GREP='/usr/bin/egrep'
+DIFF='/usr/bin/diff'
+MKTEMP='/bin/mktemp'
+MKDIR='/bin/mkdir'
+RM='/bin/rm'
+TOUCH='/usr/bin/touch'
+
+JAVA='/etc/alternatives/java'
+RAIDCMD='/usr/share/java/raidcmd21.jar'
+
+PROGNAME=$(/usr/bin/basename $0)
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+REVISION='1.2'
+OLD_DIR="/var/cache/$PROGNAME"
+PASSWORD=''
+TIMEOUT='120'
+
+. "$PROGPATH/utils.sh" || { $ECHO "Could not read $PROGPATH/utils.sh\n" >&2; exit 3; }
+
+print_usage() {
+    $ECHO "Usage: $PROGNAME -H <hostname> -P <password> [-t <timeout>][-c][-j <path_to_java>][-r <path_to_raidcmd>]\n"
+    $ECHO "       -H : expects IP or DNS name for the array\n"
+    $ECHO "       -P : the password for login\n"
+    $ECHO "       -t : timeout (default: $TIMEOUT) in seconds\n"
+    $ECHO "       -c : clear the event log of the device\n"
+    $ECHO "       -j : path to the Java executable (default: $JAVA)\n"
+    $ECHO "       -r : path to the RaidCMD executable (default: $RAIDCMD)\n"
+}
+
+print_help() {
+    print_revision "$PROGNAME" "$REVISION"
+    $ECHO "\n"
+    print_usage
+    $ECHO "\n"
+    $ECHO "Read event log from Transtec devices\n"
+    $ECHO "\n"
+    support
+}
+
+cleanup () {
+    test -n "$TMPF" && $RM -rf "$TMPF"
+    $RM -f "/tmp/ttcheck-$ADDRFILE"
+}
+
+cleanup_and_exit () {
+   cleanup
+   exit $1
+}
+
+create_output() {
+    FILE="$1"
+    output='no (new) messages in event log'
+    state='OK'
+    N_ALERTS=$($GREP ALERT "$FILE" | grep -v BBU | wc -l)
+    N_MEDIA=$($GREP -c "Media Error" "$FILE")
+    if [ "$N_MEDIA" != "0" ]; then
+        state='WARNING'
+        output="controller reports $N_MEDIA errors;"
+    fi
+    if [ "$N_ALERTS" != "0" ]; then
+        state='CRITICAL'
+        output="controller has $N_ALERTS alert messages; $output"
+    fi
+    OUTPUT="$state: $output"
+    status=STATE_$state
+    eval exitstatus=\$$status
+}
+
+create_perfdata(){
+    FILE="$1"
+    N_ALERTS=$($GREP ALERT "$FILE" | grep -v BBU | wc -l)
+    N_MEDIA=$($GREP -c "Media Error" "$FILE")
+    echo "alerts=$N_ALERTS;media_errors=$N_MEDIA;"
+}
+
+trap cleanup 0 1 2 3 4 7 13 15
+
+if [ $# -lt 1 ]; then
+    print_usage
+    exit $STATE_UNKNOWN
+fi
+
+exitstatus=$STATE_WARNING #default
+output='WARNING: no output generated'
+
+while getopts 'hcVH:P:t:r:j:' OPTION ; do
+    case $OPTION in
+        h) 
+            print_help
+            exit $STATE_OK
+        ;;
+        c)
+            CLEAN_LOGFILES="yes"
+        ;;
+        V)
+            print_revision $PROGNAME $REVISION
+            exit $STATE_OK
+        ;;
+        H)
+            ADDR="$OPTARG"
+        ;;
+        P)
+            PASSWORD="$OPTARG"
+        ;;
+        t)
+            TIMEOUT="$OPTARG"
+        ;;
+        j)
+            JAVA="$OPTARG"
+        ;;
+        r)
+            RAIDCMD="$OPTARG"
+        ;;
+    esac
+done
+shift $(( OPTIND - 1 ))
+
+if [ -z "$ADDR" ]; then
+    $ECHO "Please give at least an IP address"
+    print_usage
+    cleanup_and_exit $STATE_UNKNOWN
+fi
+
+ADDRFILE=$(echo "$ADDR" | sed "s|\.|_|g")
+TMPF=$($MKTEMP -d /tmp/ttcheck-XXXXXX)
+$TOUCH "$TMPF/$ADDRFILE"
+
+lockfile -10 -r3 "/tmp/ttcheck-$ADDRFILE" || {
+   $ECHO "already running for $ADDR"
+   cleanup_and_exit 3
+}
+
+test -n "$TMPF" -a -d "$TMPF" || {
+    $ECHO "mktemp failed"
+    cleanup_and_exit $STATE_UNKNOWN
+}
+
+if ! test -x $JAVA ; then
+    $ECHO "Could not execute $JAVA"
+    cleanup_and_exit $STATE_UNKNOWN
+fi
+
+if ! test -f $RAIDCMD ; then
+    $ECHO "Could not find $RAIDCMD"
+    cleanup_and_exit $STATE_UNKNOWN
+fi
+
+if ! test -d $OLD_DIR ; then
+    $ECHO "Could not find directory to store old files"
+    $ECHO "Please create it for user $USER"
+    cleanup_and_exit $STATE_UNKNOWN
+fi
+
+CUR_OLD_DIR="$OLD_DIR/$ADDRFILE"
+test -d "$CUR_OLD_DIR" || $MKDIR "$CUR_OLD_DIR"
+
+# magic begins here...
+if [ "$CLEAN_LOGFILES" == "yes" ]; then
+        {
+                echo connect $ADDR -p $PASSWORD
+                echo delete event
+                echo disconnect
+                echo exit
+        } | timeout --kill-after=8s ${TIMEOUT}s $JAVA -jar $RAIDCMD > "$TMPF/raidout"
+        # finished - give some feedback
+        exitstatus=$STATE_OK
+        $ECHO "OK: event log cleared\n"
+        cleanup_and_exit $exitstatus
+else
+        {
+                echo connect $ADDR -p $PASSWORD
+                echo show event
+                echo disconnect
+                echo exit
+        } | timeout --kill-after=8s ${TIMEOUT}s $JAVA -jar $RAIDCMD > "$TMPF/raidout"
+fi
+
+oldfile="$CUR_OLD_DIR/raidout"
+
+# what to do if we have no old data?
+# use the current data
+if [ ! -e "$oldfile" ]; then
+    create_output "$TMPF/raidout"
+else
+    $DIFF "$TMPF/raidout" "$oldfile" | $GREP -v "^>" > "$TMPF/diff"
+    create_output "$TMPF/diff"
+    # if everything looks fine in the first run, check the "history"
+    if [ $exitstatus = $STATE_OK ]; then
+        NEW_OUTPUT="$OUTPUT"
+        create_output "$TMPF/raidout"
+        if [ $exitstatus != $STATE_OK ]; then
+            OUTPUT="WARNING: No new errors/warnings, but old ones: $OUTPUT"
+            exitstatus=$STATE_WARNING
+        fi
+    fi
+fi
+PERFDATA=$(create_perfdata "$TMPF/raidout")
+# overwrite old output for next diff
+cat "$TMPF/raidout" > "$oldfile"
+
+echo -e "$OUTPUT|$PERFDATA"
+cleanup_and_exit $exitstatus

@@ -1,0 +1,41 @@
+-------------------------------------------------------------------
+Wed Jul 30 19:23:34 UTC 2014 - lars@linux-schulserver.de
+
+- Renamed package to monitoring-plugins-transtec
+
+-------------------------------------------------------------------
+Thu Sep 19 08:29:12 UTC 2013 - lars@linux-schulserver.de
+
+- use "delete event" instead of "clear event" as the last one 
+  will block too long in case of long event logs
+
+-------------------------------------------------------------------
+Wed Jul 11 08:10:25 UTC 2012 - lars@linux-schulserver.de
+
+- update to 1.2:
+  + added '-t', '-j' and '-r' option to allow the user to define 
+    timeout, path to java and path to raidcmd binaries
+  + added '-c' option to cleanup the event log
+
+-------------------------------------------------------------------
+Fri Jul  6 13:01:18 CEST 2012 - ro@suse.de
+
+- use timeout command instead of playing games with sleep command 
+
+-------------------------------------------------------------------
+Mon Jul  2 21:12:04 UTC 2012 - lars@linux-schulserver.de
+
+- update to 1.1:
+  + fix typo in -h option
+  + increase default timeout to 120 seconds
+
+-------------------------------------------------------------------
+Sun May  6 01:19:58 UTC 2012 - lars@linux-schulserver.de
+
+- fix license to be in spdx format
+
+-------------------------------------------------------------------
+Tue Jan 24 15:26:12 UTC 2012 - lars@linux-schulserver.de
+
+- initial version 1.0
+
