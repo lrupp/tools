@@ -1,0 +1,12 @@
+    network inet dgram,
+    network inet6 dgram,
+
+    /proc/filesystems r,
+    /etc/resolv.conf r,
+    /etc/nsswitch.conf r,
+    /etc/host.conf r,
+    /etc/hosts r,
+    /etc/rpm/ r,
+    /etc/rpm/macros* r,
+    /var/lib/rpm/** rlk,
+
