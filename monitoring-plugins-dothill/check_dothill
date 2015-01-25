@@ -1,0 +1,594 @@
+#!/usr/bin/perl
+# nagios: -epn
+#
+# check_dothill - nagios plugin
+#
+# Copyright (C) 2012, SUSE Linux Products GmbH
+# Author: Lars Vogdt <lars@linux-schulserver.de>
+#
+# All rights reserved.
+#   
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#   
+# * Redistributions of source code must retain the above copyright notice, this
+#   list of conditions and the following disclaimer.
+#   
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+#   
+# * Neither the name of the Novell nor the names of its contributors may be
+#   used to endorse or promote products derived from this software without
+#   specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+
+use strict;
+use warnings;
+use Getopt::Long;
+use Net::Telnet;
+use Pod::Usage;
+
+our $conf={
+    VERSION  => '0.1.0',
+    PROGNAME => 'check_dothill',
+    config   => "/etc/check_dothill.conf",
+    debug    => 0,
+    logfile  => '/var/log/check_dothill.log',
+    loglevel => 1,
+    host     => 'localhost',
+    username => 'manage',
+    password => 'manage',
+    timeout  => 60,
+    no_sensors => 0,
+    no_controllers=>0,
+    no_vdisks=>0,
+    no_ports=>0,
+    no_disks=>0, 
+};
+our %ERRORS = (
+    'OK'        => 0,
+    'WARNING'   => 1,
+    'CRITICAL'  => 2,
+    'UNKNOWN'   => 3,
+    'DEPENDENT' => 4,
+);
+my $print_help = 0;
+my $exitcode   = 0;
+
+#######################################################################
+## Function Area
+#######################################################################
+
+sub unknown_option {
+	print "Problem with options, try to -h to get full help about all options \n";
+	exit "$ERRORS{'UNKNOWN'}";
+}
+
+sub check_vdisks($){
+	my ($conf)=@_;
+	my $output='';
+ 	my $perfdata='';
+	my $exitcode='OK';
+	my $vdisk_count=0;
+	#
+	# LOGIN
+	# dump_log($conf->{'logfile'})
+	my $t = new Net::Telnet (	-Timeout => $conf->{'timeout'},
+					-Errmode => 'return',
+					-Prompt  =>  '/\# /') or return("Could not open socket",'CRITICAL');
+	my $ret = $t->open($conf->{'host'}) or return("Could not connect to $conf->{'host'}",'CRITICAL');
+	if($conf->{'debug'}){
+		$t->dump_log($conf->{'logfile'});
+		print STDERR "Connected - waiting for password prompt\n";
+	}
+	$ret = $t->login($conf->{'username'}, $conf->{'password'}) or return("Could not login to $conf->{'host'}",'CRITICAL');
+	if($conf->{'debug'}){
+		$t->dump_log($conf->{'logfile'});
+		print STDERR "Logged in - waiting for prompt\n";
+	}
+	#
+	# SHOW VDISKS
+	#
+	my @lines=$t->cmd("show vdisks\n");
+
+	if($conf->{'debug'}){
+		$t->dump_log($conf->{'logfile'});
+		print STDERR "Showing vdisks\n";
+	}
+	foreach (@lines){
+		if($conf->{'debug'}){
+			print STDERR "$_\n";
+		}
+		next if (/^ /);
+		next if (/^--/);
+		next if (/^Success:/);
+		next if (/^\s*$/);
+		next if (/^Name /);
+		my ($name,$size,$free,$Own,$pref,$raid,$disks,$spr,$chk,$status,$jobs,$jobar,$serial,$spin_down,$spin_down_delay)=split(/\s+/,$_);
+		if ($_ =~ /Crit/){
+			$output.="vdisk error on $name; ";
+			$exitcode='CRITICAL';
+		}
+		$vdisk_count++;
+		$perfdata.="'$name'=$size;$free; ";
+	}
+	#
+	# EXIT
+	#
+	$output.="$vdisk_count vdisks defined; ";
+        $t->cmd("exit");	
+	$t->close;
+	return("$output","$exitcode","$perfdata");
+}
+
+sub check_controllers($){
+        my ($conf)=@_;
+        my $output='';
+        my $exitcode='OK';
+        #
+        # LOGIN
+        #
+        my $t = new Net::Telnet (       -Timeout => $conf->{'timeout'},
+                                        -Errmode => 'return',
+                                        -Prompt  =>  '/\# /') or return("Could not open socket",'CRITICAL');
+        my $ret = $t->open($conf->{'host'}) or return("Could not connect to $conf->{'host'}",'CRITICAL');
+        if($conf->{'debug'}){
+                $t->dump_log($conf->{'logfile'});
+                print STDERR "Connected - waiting for password prompt\n";
+        }
+        $ret = $t->login($conf->{'username'}, $conf->{'password'}) or return("Could not login to $conf->{'host'}",'CRITICAL');
+        if($conf->{'debug'}){
+                $t->dump_log($conf->{'logfile'});
+                print STDERR "Logged in - waiting for prompt\n";
+        }
+        # 
+        # SHOW CONTROLLERS
+        #
+        my @lines = $t->cmd("show controllers\n");
+        if($conf->{'debug'}){
+                $t->dump_log($conf->{'logfile'});
+                print STDERR "Showing controllers\n";
+        }
+	my %controller_info;
+	my $controller_id;
+        foreach my $line (@lines){
+                if($conf->{'debug'}){
+                        print STDERR "LINE: $line\n";
+                }
+                next if ($line =~ /^ /);
+		if ($line =~ /Controller ID: (.*)/){
+			$controller_id=$1;
+			$controller_info{$controller_id}->{'id'}="$controller_id";
+		}
+		elsif ($line =~ /Serial Number: (.*)/){
+			$controller_info{$controller_id}->{'serial'}=$1;			
+		}
+		elsif ($line =~ /Status: (.*)/){
+			$controller_info{$controller_id}->{'status'}=$1;
+		}
+		elsif ($line =~ /Failed Over: (.*)/){
+			$controller_info{$controller_id}->{'failed_over'}=$1;
+		}
+		elsif ($line =~ /Position: (.*)/){
+			$controller_info{$controller_id}->{'position'}=$1;
+		}
+	}
+	foreach my $id (sort(keys(%controller_info))){
+		if ($controller_info{$id}->{'status'} !~ /Operational/){
+			$output.="Controller $id (Serial: ".$controller_info{$id}->{'serial'}."; Position: ".$controller_info{$id}->{'position'}.") is in state ".$controller_info{$id}->{'status'}."; ";
+			$exitcode='CRITICAL';
+		}
+		elsif ($controller_info{$id}->{'failed_over'} !~ /No/){
+			$output.="Controller $id (Serial: ".$controller_info{$id}->{'serial'}."; Position: ".$controller_info{$id}->{'position'}.") state ".$controller_info{$id}->{'status'}." is running in fail over mode; ";
+			$exitcode='CRITICAL';
+		}
+		else {
+			$output.="Controller $id (Serial: ".$controller_info{$id}->{'serial'}."; Position: ".$controller_info{$id}->{'position'}.") state OK; ";
+		}
+	}
+	return("$output","$exitcode");
+}
+
+sub check_disks($){
+	my ($conf)=@_;
+	my $output='OK';
+	my $exitcode='OK';
+#	my $disk_count=0;
+# 	my $perfdata='';
+#	my ($location,$serial,$vendor,$rev,$spare_type,$used_as,$type,$size,$rate,$health,$health_reason)='';
+	#
+	# LOGIN
+	#
+	my $t = new Net::Telnet (	-Timeout => $conf->{'timeout'},
+					-Errmode => 'return',
+					-Prompt  =>  '/\# /') or return("Could not open socket",'CRITICAL');
+	my $ret = $t->open($conf->{'host'}) or return("Could not connect to $conf->{'host'}",'CRITICAL');
+	if($conf->{'debug'}){
+		$t->dump_log($conf->{'logfile'});
+		print STDERR "Connected - waiting for password prompt\n";
+	}
+	$ret = $t->login($conf->{'username'}, $conf->{'password'}) or return("Could not login to $conf->{'host'}",'CRITICAL');
+	if($conf->{'debug'}){
+		$t->dump_log($conf->{'logfile'});
+		print STDERR "Logged in - waiting for prompt\n";
+	}
+	# 
+	# SHOW DISKS
+	#
+	my @lines = $t->cmd("show disks\n");
+	if($conf->{'debug'}){
+		$t->dump_log($conf->{'logfile'});
+		print STDERR "Showing disks\n";
+	}
+
+	foreach my $line (@lines){
+		if($conf->{'debug'}){
+			print STDERR "LINE: $line\n";
+		}
+		next if ($line =~ /^ /);
+                next if ($line =~ /^--/);
+                next if ($line =~ /^Success:/);
+                next if ($line =~ /^Info:/);
+		next if ($line =~ /^\s*Size/);
+                next if ($line =~ /^\s*$/);
+		next if ($line =~ /^Location/);
+		if ($line !~ /OK/){
+			$output.="disk critical: $line";
+			$exitcode='CRITICAL';
+		}
+	}
+	#
+	# EXIT
+	#
+        $t->cmd("exit");	
+	$t->close;
+	return("$output","$exitcode");
+}
+
+sub check_ports($){
+	my ($conf)=@_;
+	my $output='OK';
+	my $exitcode='OK';
+	my $portcount=0;
+	#
+	# LOGIN
+	#
+	my $t = new Net::Telnet (	-Timeout => $conf->{'timeout'},
+					-Errmode => 'return',
+					-Prompt  =>  '/\# /') or return("Could not open socket",'CRITICAL');
+	my $ret = $t->open($conf->{'host'}) or return("Could not connect to $conf->{'host'}",'CRITICAL');
+	if($conf->{'debug'}){
+		$t->dump_log($conf->{'logfile'});
+		print STDERR "Connected - waiting for password prompt\n";
+	}
+	$ret = $t->login($conf->{'username'}, $conf->{'password'}) or return("Could not login to $conf->{'host'}",'CRITICAL');
+	if($conf->{'debug'}){
+		$t->dump_log($conf->{'logfile'});
+		print STDERR "Logged in - waiting for prompt\n";
+	}
+	#
+	# SHOW PORTS
+	#
+	my @ports=$t->cmd("show ports\n");
+	if($conf->{'debug'}){
+		$t->dump_log($conf->{'logfile'});
+		print STDERR "Showing ports\n";
+	}
+	foreach (@ports){
+		if($conf->{'debug'}){
+			print STDERR "$_\n";
+		}
+		next if (/^ /);
+                next if (/^--/);
+                next if (/^Success:/);
+                next if (/^\s*$/);
+                next if (/^\sPorts/);
+		my ($port,$media,$targetid,$status,$speeda,$speedc)=split(/\s+/,$_);
+		if ($_ =~ /Disconnected/){
+			$output.="Port disconnected: $port; ";
+			$exitcode='CRITICAL';	
+		}
+		elsif ($_ =~ /Up/){
+			$portcount++;
+		}
+	}
+	$output="$portcount Ports are in state 'Up'; ";
+	#
+	# EXIT
+	#
+        $t->cmd("exit");	
+	$t->close;
+	return("$output","$exitcode");
+}
+
+sub trim($){
+	my ($string)=@_;
+	$string =~ s/^\s+//;
+	$string =~ s/\s+$//;
+	return $string;
+}
+
+sub check_sensors($){
+        my ($conf)=@_;
+        my $output='';
+	my $master_output='';
+        my $exitcode='OK';
+        my $perfdata='';
+        #
+        # LOGIN
+        #
+        my $t = new Net::Telnet (       -Timeout => $conf->{'timeout'},
+                                        -Errmode => 'return',
+                                        -Prompt  =>  '/\# /') or return("Could not open socket",'CRITICAL');
+        my $ret = $t->open($conf->{'host'}) or return("Could not connect to $conf->{'host'}",'CRITICAL');
+        if($conf->{'debug'}){
+                $t->dump_log($conf->{'logfile'});
+                print STDERR "Connected - waiting for password prompt\n";
+        }
+        $ret = $t->login($conf->{'username'}, $conf->{'password'}) or return("Could not login to $conf->{'host'}",'CRITICAL');
+        if($conf->{'debug'}){
+                $t->dump_log($conf->{'logfile'});
+                print STDERR "Logged in - waiting for prompt\n";
+        }
+        # 
+        # SHOW SENSORS
+        #
+        my @lines = $t->cmd("show sensor-status\n");
+        if($conf->{'debug'}){
+                $t->dump_log($conf->{'logfile'});
+                print STDERR "Showing sensor-status\n";
+        }
+        foreach my $line (@lines){
+                if($conf->{'debug'}){
+                        print STDERR "LINE: $line\n";
+                }
+                next if ($line =~ /^ /);
+                next if ($line =~ /^--/);
+                next if ($line =~ /^Success/);
+                next if ($line =~ /^Sensor/);
+		if ($line =~ /^Temperature Loc: (.*)\s+(\d+) C\s+(.*)/){
+			my $loc=trim($1);
+			my $state=trim($3);
+			my $temp=trim($2);
+			$output.="Temp $loc $state: $temp C; ";
+			$perfdata.="'temp $loc'=$temp; ";
+		}
+		elsif ($line =~ /On-Board Temperature (.*)\s+(\d+) C\s+(.*)/){
+                        my $loc=trim($1);
+                        my $state=trim($3);
+                        my $temp=trim($2);
+                        $output.="On-Board Temp $loc $state: $temp C; ";
+                        $perfdata.="'temp $loc'=$temp; ";
+
+		}
+		elsif ($line =~ /Disk Controller (.*)\s+(\d+) C\s+(.*)/){
+                        my $loc=trim($1);
+                        my $state=trim($3);
+                        my $temp=trim($2);
+                        $output.="Disk Controller Temp $loc $state: $temp C; ";
+                        $perfdata.="'disk contr. $loc'=$temp; ";
+		}
+		elsif ($line =~ /Memory Controller (.*)\s+(\d+) C\s+(.*)/){
+                        my $loc=trim($1);
+                        my $state=trim($3);
+                        my $temp=trim($2);
+                        $output.="Memory Controller Temp $loc $state: $temp C; ";
+                        $perfdata.="'mem contr. $loc'=$temp; ";
+		}
+		# Overall Unit Status               OK       OK
+		elsif ($line =~ /Overall Unit Status\s+(\w+)\s+(\w+)/){
+			my $state=trim($1);
+			if ($state !~ /OK/){
+				$exitcode='CRITICAL';
+			}
+			$master_output="Overall Unit Status $state;";
+		}
+	}
+	$output="$master_output $output";
+	#
+	# EXIT
+	#
+    $t->cmd("exit");	
+	$t->close;
+	return("$output","$exitcode", "$perfdata");
+}
+
+
+#######################################################################
+## Main Area
+#######################################################################
+
+my $number_of_options = @ARGV;
+
+pod2usage (  -exitstatus => 0,
+	-verbose => 2,  # 2 to print full pod
+        ) if $number_of_options == 0;
+
+Getopt::Long::Configure('bundling');
+GetOptions( "h|help"         => \$print_help,
+            "c|config=s"     => \$conf->{'config'},
+            "d|debug"        => \$conf->{'debug'},
+            "logfile=s"      => \$conf->{'logfile'},
+            "loglevel=i"     => \$conf->{'loglevel'},
+            "t|timeout=i"    => \$conf->{'timeout'},
+            "u|username=s"   => \$conf->{'username'},
+            "p|password=s"   => \$conf->{'password'},
+            "H|host=s"       => \$conf->{'host'},
+            "S|no-sensors"      => \$conf->{'no_sensors'},
+            "C|no-controllers"  => \$conf->{'no_controllers'},
+            "V|no-vdisks"	=> \$conf->{'no_vdisks'},
+            "P|no-ports"	=> \$conf->{'no_ports'},
+            "D|no-disks"	=> \$conf->{'no_disks'},
+) or (unknown_option);	
+
+pod2usage (  -exitstatus => 0,
+	-verbose => 2,  # 2 to print full pod
+        ) if $print_help;
+
+if ($conf->{'debug'}){
+    use Data::Dumper;
+    print STDERR "Config:\n".Data::Dumper->Dump([$conf])."\n";
+}
+
+# Just in case of problems, let's not hang Nagios
+$SIG{'ALRM'} = sub {
+    print "UNKNOWN - Plugin timed out\n";
+    exit $ERRORS{'UNKNOWN'};
+};
+alarm($conf->{'timeout'});
+
+my $exit='OK';
+my $output='';
+my $perfdata='';
+
+if (! $conf->{'no_sensors'}){
+	# sensor output
+	my ($sensor_output,$sensor_exit,$sensor_perfdata)=check_sensors($conf);
+	if ($sensor_exit !~ /OK/){
+		$exit=$sensor_exit;
+	}
+	$output.=$sensor_output;
+	$perfdata.=$sensor_perfdata;
+}
+if (! $conf->{'no_controllers'}){
+	# check controllers
+	my ($controller_output,$controller_exit)=check_controllers($conf);
+	if ($controller_exit !~ /OK/){
+		$exit=$controller_exit;
+	}
+	$output.=$controller_output;
+}
+if (! $conf->{'no_vdisks'}){
+	# check vdisks
+	my ($vdisk_output,$vdisk_exit,$vdisk_perfdata)=check_vdisks($conf);
+	if ($vdisk_exit !~ /OK/){
+		$exit=$vdisk_exit;
+	}
+	$output.=$vdisk_output;
+}
+if (! $conf->{'no_ports'}){
+	# check ports
+	my ($portoutput,$portexit)=check_ports($conf);
+	if ($portexit !~ /OK/){
+		$exit=$portexit;
+	}
+	$output.=$portoutput;
+}
+#if (! $conf->{'no_disks'}){
+# disk output
+#my ($disk_output,$disk_exit)=check_disks($conf);
+#if ($disk_exit !~ /OK/){
+#	$exit=$disk_exit;
+#}
+#$output.=$disk_output;
+#}
+
+print "$output | $perfdata\n";
+
+alarm(0);
+
+exit $ERRORS{$exit}
+
+
+__END__
+
+=head1 Check Dothill RAID Array
+
+Check Dot Hill Revolution Storage Arrays.
+
+=head1 SYNOPSIS
+
+./check_dothill -H <hostname> -u <username> -p <password>  <OPTIONS>
+
+Options:
+
+    -c <file>      | --config <file>
+    -H <host>      | --host <host>
+    -u <username>  | --username <username>
+    -p <password>  | --password <password>
+
+     -S            | --no-sensors
+     -C            | --no-controllers
+     -V            | --no-vdisks
+     -P            | --no-ports
+     -D            | --no-disks
+
+                   | --logfile <file>
+                   | --loglevel <int>
+
+    -h             | --help
+    -d             | --debug
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--config> F<file>
+
+Use configfile F<file> to get needed options.
+
+=item B<--host> F<HOST>
+
+The hostname or IP address.
+
+=item B<--username> F<USERNAME>
+
+The username to login to the console.
+
+=item B<--password> F<PASSWORD>
+
+The password to login to the console.
+
+=item B<--no-sensors>
+
+Disable sensor check.
+
+=item B<--no-controllers>
+
+Disable controller check.
+
+=item B<--no-vdisks>
+
+Disable virtual disk check.
+
+=item B<--no-ports>
+
+Disable port check.
+
+=item B<--no-disks>
+
+Disable phisical disk check.
+
+
+=back
+
+=head1 DESCRIPTION
+
+Use check_dothill if you want to get some information about your Dot Hill
+Revolution Storage Arrays. The pluing uses a Telnet connection and the given
+username/password pair to login and execute some commands. Afterwards the
+output is parsed, condensed and re-arranged for a Nagios Plugin compatible
+output.
+
+=head1 AUTHORS
+
+=over 8
+
+=item Lars Vogdt <lars@linux-schulserver.de> 2012
+
+=back
+
+=cut

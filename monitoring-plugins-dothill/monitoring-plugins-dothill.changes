@@ -1,0 +1,28 @@
+-------------------------------------------------------------------
+Wed Jul 30 15:14:42 UTC 2014 - lars@linux-schulserver.de
+
+- renamed to monitoring-plugins-dothill
+
+-------------------------------------------------------------------
+Tue Jul 29 07:34:47 UTC 2014 - mcaj@suse.com
+
+- added logfile variable to dump command is -d is added there.
+
+-------------------------------------------------------------------
+Mon Jul 28 14:40:38 UTC 2014 - mcaj@suse.com
+
+- replace $print_help = 1 unless @ENV with my $number_of_options = @ARGV
+- and add pod2usage for case there no optiton is added. 
+- if option is wrong program will exit with error code 3
+
+-------------------------------------------------------------------
+Thu May 29 14:25:59 UTC 2014 - mcaj@suse.com
+
+- fixed print out help where there is no option for script.
+- added URL to build build service to avoid warring about URL.
+
+-------------------------------------------------------------------
+Thu May 31 13:31:21 UTC 2012 - lars@linux-schulserver.de
+
+- initial version 0.1.0
+
