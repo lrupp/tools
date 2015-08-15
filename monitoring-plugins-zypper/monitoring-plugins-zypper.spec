@@ -1,7 +1,7 @@
 #
 # spec file for package monitoring-plugins-zypper
 #
-# Copyright (c) 2012-2014 SUSE LINUX Products GmbH, Nuernberg, Germany.
+# Copyright (c) 2015 SUSE LINUX GmbH, Nuernberg, Germany.
 #
 # All modifications and additions to the file contributed by third parties
 # remain the property of their copyright owners, unless otherwise agreed
@@ -18,10 +18,10 @@
 
 Name:           monitoring-plugins-zypper
 Summary:        Check for software updates via zypper
-License:        BSD-4-Clause
+License:        BSD-3-Clause
 Group:          System/Monitoring
 Version:        1.82
-Release:        100
+Release:        0
 Url:            http://en.opensuse.org/Monitoring-plugins-zypper
 Source0:        check_zypper.pl
 Source1:        usr.lib.nagios.plugins.check_zypper 

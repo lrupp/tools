@@ -53,6 +53,7 @@
     /usr/bin/gpg2 px -> /usr/lib/nagios/plugins/check_zypper//gpg,
     /usr/bin/uuidgen px -> /usr/lib/nagios/plugins/check_zypper//uuidgen,
     /usr/bin/repo2solv.sh px -> /usr/lib/nagios/plugins/check_zypper//repo2solv, 
+    /var/lib/YaST2/cookies r,
   }
   profile repo2solv {
     #include <abstractions/base>

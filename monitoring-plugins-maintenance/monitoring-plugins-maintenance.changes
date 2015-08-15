@@ -1,4 +1,20 @@
 -------------------------------------------------------------------
+Sat Aug 15 20:30:56 UTC 2015 - lars@linux-schulserver.de
+
+- update to 3.3:
+  + run perltidy with options "-pbp -l=72 -q"
+
+-------------------------------------------------------------------
+Mon Jul 27 09:57:51 UTC 2015 - lars@linux-schulserver.de
+
+- update to 3.2:
+  + add --mysql option to get the values from a RackTables database;
+    currently tested only with RackTables version 0.20.10
+  + place dummy check_maintenance.ini file in /etc/monitoring-plugins
+  + move default maintenance_data.txt file to /etc/monitoring-plugins
+    directory to follow the default place for plugin configs
+
+-------------------------------------------------------------------
 Tue Dec  2 17:53:42 UTC 2014 - lars@linux-schulserver.de
 
 - update to 2.2:

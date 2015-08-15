@@ -1,4 +1,14 @@
 -------------------------------------------------------------------
+Tue Mar  3 12:47:22 UTC 2015 - lars@linux-schulserver.de
+
+- allow to open /var/lib/YaST2/cookies in zypp-refresh
+
+-------------------------------------------------------------------
+Sun Mar  1 10:23:04 UTC 2015 - lars@linux-schulserver.de
+
+- use BSD-3-Clause as license
+
+-------------------------------------------------------------------
 Sat Dec 13 19:44:44 UTC 2014 - lars@linux-schulserver.de
 
 - allow DNS resolution for abstraction RPM and kernel random usage 

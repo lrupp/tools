@@ -1,7 +1,7 @@
 #
 # spec file for package monitoring-plugins-maintenance
 #
-# Copyright (c) 2014 SUSE LINUX GmbH, Nuernberg, Germany.
+# Copyright (c) 2014-2015 SUSE LINUX GmbH, Nuernberg, Germany.
 #
 # All modifications and additions to the file contributed by third parties
 # remain the property of their copyright owners, unless otherwise agreed
@@ -17,13 +17,14 @@
 
 
 Name:           monitoring-plugins-maintenance
-Version:        2.2
+Version:        3.3
 Release:        0
 Summary:        Check, if a host is in service
 License:        BSD-3-Clause
 Group:          System/Monitoring
 Url:            http://en.opensuse.org/Monitoring-plugins-maintenance
 Source0:        check_maintenance.pl
+Source1:        check_maintenance.ini
 BuildRequires:  nagios-rpm-macros
 Provides:       nagios-plugins-maintenance = %{version}-%{release}
 Obsoletes:      nagios-plugins-maintenance < %{version}-%{release}
@@ -55,6 +56,8 @@ the room or inventory number of the host.
 #
 %install
 install -D -m755 %{SOURCE0} %{buildroot}%{nagios_plugindir}/check_maintenance
+mkdir -p %{buildroot}/%{plugin_confdir}
+install -m0640 %{SOURCE1} %{buildroot}/%{plugin_confdir}/check_maintenance.ini
 
 %clean
 rm -rf %{buildroot}
@@ -64,6 +67,8 @@ rm -rf %{buildroot}
 # avoid build dependecy of nagios - own the dirs
 %dir %{nagios_libdir}
 %dir %{nagios_plugindir}
+%dir %{plugin_confdir}
 %{nagios_plugindir}/check_maintenance
+%config(noreplace) %{plugin_confdir}/check_maintenance.ini
 
 %changelog

@@ -5,8 +5,8 @@
 #
 # Copyright (C) 2010, Novell, Inc.
 # Copyright (C) 2014, SUSE Linux Products GmbH, Nuremberg
-# Copyright (C) 2014, SUSE Linux GmbH, Nuremberg
-# Author: Lars Vogdt
+# Copyright (C) 2014-2015, SUSE Linux GmbH, Nuremberg
+# Author: Lars Vogdt <Lars.Vogdt@suse.com>
 #
 # All rights reserved.
 #
@@ -36,8 +36,6 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-# $Id: check_maintenance.pl,v 1.7 2010/03/16 11:16:18 lrupp Exp $
-#
 
 use strict;
 use warnings;
@@ -52,14 +50,15 @@ $ENV{'BASH_ENV'} = '';
 $ENV{'ENV'}      = '';
 
 our $conf = {
-    VERSION     => '2.2',
-    PROGNAME    => 'check_maintenance',
-    maint_file  => '/etc/nagios/maintenance_data.txt',
-    budget_date => '01.01.1970',
-    timeout     => 120,
-    critical    => 4,
-    warning     => 8,
-    debug       => 0
+    VERSION      => '3.3',
+    PROGNAME     => 'check_maintenance',
+    maint_file   => '/etc/monitoring-plugins/maintenance_data.txt',
+    mysql_config => '',
+    budget_date  => '01.01.1970',
+    timeout      => 120,
+    critical     => 4,
+    warning      => 8,
+    debug        => 0
 };
 
 our $print_version = 0;
@@ -124,15 +123,15 @@ sub read_maintenance_data($) {
                     DEBUG("No valid date for $host");
                 }
             }
-            if ( $comment =~ /^(.*)\|(.*)\|(.*)/ ){
-                my ( $vendor, $serial, $inventory, $comment ) = split( '\|', $comment );
-                DEBUG(
-                    "More information in comment detected."
-                );
-                $data{$host}{'serial'}  = $serial if defined($serial);
-                $data{$host}{'inventory'}  = $inventory if defined($inventory);
+            if ( $comment =~ /^(.*)\|(.*)\|(.*)/ ) {
+                my ( $vendor, $serial, $inventory, $comment )
+                    = split( '\|', $comment );
+                DEBUG( "More information in comment detected." );
+                $data{$host}{'serial'} = $serial if defined($serial);
+                $data{$host}{'inventory'} = $inventory
+                    if defined($inventory);
                 $data{$host}{'comment'} = $comment if defined($comment);
-                $data{$host}{'vendor'}  = $vendor if defined($vendor);
+                $data{$host}{'vendor'}  = $vendor  if defined($vendor);
             }
             elsif ( $comment =~ /.*\|.*/ ) {
                 my ( $vendor, $comment ) = split( '\|', $comment, 2 );
@@ -150,6 +149,126 @@ sub read_maintenance_data($) {
             DEBUG("Could not parse line: $line");
         }
     }
+    return \%data;
+}
+
+sub read_maintenance_data_from_racktables_db($$) {
+    use Config::Simple;
+    use DBI;
+    my ( $mysql_config, $host ) = @_;
+    my %data;
+    my $cfg = new Config::Simple("$mysql_config")
+        or croak "Could not open $mysql_config : $!\n";
+    my $dbHost = $cfg->{'_DATA'}{'default'}{'MYSQL_HOST'}[0]
+        if ( defined( $cfg->{'_DATA'}{'default'}{'MYSQL_HOST'}[0] ) );
+    my $dbName = $cfg->{'_DATA'}{'default'}{'MYSQL_DB'}[0]
+        if ( defined( $cfg->{'_DATA'}{'default'}{'MYSQL_DB'}[0] ) );
+    my $dbUser = $cfg->{'_DATA'}{'default'}{'MYSQL_USER'}[0]
+        if ( defined( $cfg->{'_DATA'}{'default'}{'MYSQL_USER'}[0] ) );
+    my $dbPass = $cfg->{'_DATA'}{'default'}{'MYSQL_PASS'}[0]
+        if ( defined( $cfg->{'_DATA'}{'default'}{'MYSQL_PASS'}[0] ) );
+    my $db_ssl_ca_file = $cfg->{'_DATA'}{'default'}{'MYSQL_CA_FILE'}[0]
+        if (
+        defined( $cfg->{'_DATA'}{'default'}{'MYSQL_CA_FILE'}[0] ) );
+
+    my %db_opts = ( 'RaiseError' => 1 );
+
+    if ( defined($db_ssl_ca_file) && -r "$db_ssl_ca_file" ) {
+        $db_opts{'mysql_ssl'}         = 1;
+        $db_opts{'mysql_ssl_ca_file'} = "$db_ssl_ca_file";
+        DEBUG(
+            "Connecting via SSL to $dbName on $dbHost using $db_ssl_ca_file"
+        );
+    }
+
+    my $dbh = DBI->connect( "DBI:mysql:database=$dbName;host=$dbHost",
+        "$dbUser", "$dbPass", \%db_opts )
+        or croak "Can't connect to MySQL-Database: "
+        . $DBI::errstr . "\n";
+
+    my $query = "
+    SELECT RackObject.id AS RackTablesID,
+        RackObject.name AS hostname, 
+        AttributeValue.uint_value AS warranty,
+        RackObject.asset_no AS inventory 
+    FROM RackObject
+        LEFT JOIN AttributeValue ON (AttributeValue.object_id = RackObject.id)
+        WHERE (attr_id=21 or attr_id=22 or attr_id=24)
+        AND RackObject.name=?";
+
+    $data{$host} = $dbh->selectrow_hashref( $query, undef, $host );
+    if ( defined $data{$host}->{'warranty'}
+        && "$data{$host}->{'warranty'}" ne "" )
+    {
+        use DateTime;
+        my $dt = DateTime->from_epoch(
+            epoch => $data{$host}->{'warranty'} );
+        $data{$host}{'month'}     = $dt->month;
+        $data{$host}{'day'}       = $dt->day;
+        $data{$host}{'year'}      = $dt->year;
+        $data{$host}{'last_date'} = $dt->ymd;
+    }
+    else {
+        $data{$host}{'month'}     = 1;
+        $data{$host}{'day'}       = 1;
+        $data{$host}{'year'}      = 1970;
+        $data{$host}{'last_date'} = 'unknown';
+    }
+    if ( defined $data{$host}->{'inventory'}
+        && "$data{$host}->{'inventory'}" ne "" )
+    {
+        $data{$host}->{'inventory'}
+            = "Inventar: " . $data{$host}->{'inventory'};
+    }
+    else {
+        $data{$host}->{'inventory'} = "Inventar: unknown";
+    }
+    if ( defined $data{$host}->{'serial'}
+        && "$data{$host}->{'serial'}" ne "" )
+    {
+        $data{$host}->{'serial'}
+            = "Serial: " . $data{$host}->{'serial'};
+    }
+    else {
+        $data{$host}->{'serial'} = "Serial: unknown";
+    }
+
+    $query = "
+    SELECT 
+        Dictionary.dict_value AS vendor
+    FROM RackObject
+        LEFT JOIN AttributeValue ON (AttributeValue.object_id = RackObject.id)
+        LEFT JOIN Dictionary ON (Dictionary.dict_key = AttributeValue.uint_value)
+    WHERE attr_id=2 
+    AND RackObject.name=?";
+    my ($vendor) = $dbh->selectrow_array( $query, undef, $hostname );
+    if ( defined($vendor) && "$vendor" ne "" ) {
+        $vendor =~ s/%GPASS%/ /g;
+        $vendor =~ s/\|.*//g;
+        $vendor =~ s/\[\[//g;
+        $data{$host}->{'vendor'} = "$vendor";
+    }
+    else {
+        $data{$host}->{'vendor'} = "unkown";
+    }
+
+    $query = "
+   SELECT
+        AttributeValue.string_value as serial
+   FROM RackObject
+        LEFT JOIN AttributeValue ON (AttributeValue.object_id = RackObject.id) 
+        LEFT JOIN Dictionary ON (Dictionary.dict_key = AttributeValue.uint_value)
+   WHERE attr_id=1
+   AND RackObject.name=?";
+    my ($serial) = $dbh->selectrow_array( $query, undef, $hostname );
+    if ( defined($serial) && "$serial" ne "" ) {
+        $data{$host}->{'serial'} = "Serial: $serial";
+    }
+    else {
+        $data{$host}->{'serial'} = "Serial: unkown";
+    }
+
+    $dbh->disconnect();
     return \%data;
 }
 
@@ -181,10 +300,12 @@ GetOptions(
     "critical=i"    => \$conf->{'critical'},
     "f=s"           => \$conf->{'maint_file'},
     "releasefile=s" => \$conf->{'maint_file'},
+    "m=s"           => \$conf->{'mysql_config'},
+    "mysql=s"       => \$conf->{'mysql_config'},
     "t=i"           => \$conf->{'timeout'},
     "timeout=i"     => \$conf->{'timeout'},
     "b=s"           => \$conf->{'budget_date'},
-    "budget_date=s"  => \$conf->{'budget_date'},
+    "budget_date=s" => \$conf->{'budget_date'},
 ) or pod2usage(2);
 
 pod2usage(
@@ -205,7 +326,10 @@ if ($print_version) {
 }
 
 # check the options...
-if ( !-f $conf->{'maint_file'} ) {
+if (   ( !defined( $conf->{'mysql_config'} ) )
+    && ( defined( $conf->{'maint_file'} ) && !-f $conf->{'maint_file'} )
+    )
+{
     print "CONFIG ERROR - file "
         . $conf->{'maint_file'}
         . " does not exist or is not readable\n";
@@ -229,43 +353,58 @@ if ( !defined($hostname) ) {
     exit $ERRORS{"UNKNOWN"};
 }
 
-my $dataref = read_maintenance_data( $conf->{'maint_file'} );
+$hostname = lc($hostname);
 
-if ( ! $conf->{'ignore'} ) {
-  if ( "$conf->{'budget_date'}" =~ /\d{1,2}\.\d{1,2}\.\d{4}/ ){
-	my ($day, $month, $year ) = split( '\.', $conf->{'budget_date'}, 3 );
-	if ( check_date( $year, $month, $day ) ) {
-		$conf->{'budget_day'}=$day;
-		$conf->{'budget_month'}=$month;
-		$conf->{'budget_year'}=$year;
-	}
-	else {
-		print "ERROR: given budget_day $conf->{'budget_date'} is no valid date.\n";
-		pod2usage(2);
-		alarm(0);
-		exit $ERRORS{"UNKNOWN"};
-	}
-  }
-  elsif ( "$conf->{'budget_date'}" =~ /\d{1,2}\/\d{1,2}\/\d{4}/ ) {
-	my ( $day, $month, $year ) = split( '\/', $conf->{'budget_date'}, 3 );
+my $dataref;
+
+if ( "$conf->{'mysql_config'}" ne '' ) {
+    $dataref = read_maintenance_data_from_racktables_db(
+        $conf->{'mysql_config'}, $hostname );
+}
+else {
+    $dataref = read_maintenance_data( $conf->{'maint_file'} );
+}
+
+if ( !$conf->{'ignore'} ) {
+    if ( "$conf->{'budget_date'}" =~ /\d{1,2}\.\d{1,2}\.\d{4}/ ) {
+        my ( $day, $month, $year )
+            = split( '\.', $conf->{'budget_date'}, 3 );
         if ( check_date( $year, $month, $day ) ) {
-		$conf->{'budget_day'}=$day;
-		$conf->{'budget_month'}=$month;
-		$conf->{'budget_year'}=$year;
-	}
-	else {
-                print "ERROR: given budget_day $conf->{'budget_date'} is no valid date.\n";
-                pod2usage(2);
-                alarm(0);
-                exit $ERRORS{"UNKNOWN"};
+            $conf->{'budget_day'}   = $day;
+            $conf->{'budget_month'} = $month;
+            $conf->{'budget_year'}  = $year;
         }
-  }
-  else {
-	print "ERROR: given budget_date $conf->{'budget_date'} is unkown\n";
-	pod2usage(2);
-	alarm(0);
-	exit $ERRORS{"UNKNOWN"};
-  }
+        else {
+            print
+                "ERROR: given budget_day $conf->{'budget_date'} is no valid date.\n";
+            pod2usage(2);
+            alarm(0);
+            exit $ERRORS{"UNKNOWN"};
+        }
+    }
+    elsif ( "$conf->{'budget_date'}" =~ /\d{1,2}\/\d{1,2}\/\d{4}/ ) {
+        my ( $day, $month, $year )
+            = split( '\/', $conf->{'budget_date'}, 3 );
+        if ( check_date( $year, $month, $day ) ) {
+            $conf->{'budget_day'}   = $day;
+            $conf->{'budget_month'} = $month;
+            $conf->{'budget_year'}  = $year;
+        }
+        else {
+            print
+                "ERROR: given budget_day $conf->{'budget_date'} is no valid date.\n";
+            pod2usage(2);
+            alarm(0);
+            exit $ERRORS{"UNKNOWN"};
+        }
+    }
+    else {
+        print
+            "ERROR: given budget_date $conf->{'budget_date'} is unkown\n";
+        pod2usage(2);
+        alarm(0);
+        exit $ERRORS{"UNKNOWN"};
+    }
 }
 
 if ( $conf->{'debug'} ) {
@@ -286,28 +425,40 @@ if ( $dataref->{$hostname} ) {
     my $budget_date      = 0;
     my ( $year, $month, $day ) = Today( [0] );
 
-    if (! check_date(	$dataref->{$hostname}->{'year'},
-			$dataref->{$hostname}->{'month'},
-		        $dataref->{$hostname}->{'day'})){
-    	if ( ! $conf->{'ignore'} ){
-	    print "Wrong date values ($dataref->{$hostname}->{'year'}/$dataref->{$hostname}->{'month'}/$dataref->{$hostname}->{'day'}) for host: $hostname in $conf->{'maint_file'} - aborting\n";
+    if (!check_date(
+            $dataref->{$hostname}->{'year'},
+            $dataref->{$hostname}->{'month'},
+            $dataref->{$hostname}->{'day'}
+        )
+        )
+    {
+        if ( !$conf->{'ignore'} ) {
+            print
+                "Wrong date values ($dataref->{$hostname}->{'year'}/$dataref->{$hostname}->{'month'}/$dataref->{$hostname}->{'day'}) for host: $hostname in $conf->{'maint_file'} - aborting\n";
             alarm(0);
             exit $ERRORS{"UNKNOWN"};
         }
         else {
-            $wrong_date=1;
+            $wrong_date = 1;
         }
     }
-    if ( ! $wrong_date) {
+    if ( !$wrong_date ) {
         $service_since_ad = Date_to_Days(
-        $dataref->{$hostname}->{'year'},
-        $dataref->{$hostname}->{'month'},
-        $dataref->{$hostname}->{'day'},
-    );
+            $dataref->{$hostname}->{'year'},
+            $dataref->{$hostname}->{'month'},
+            $dataref->{$hostname}->{'day'},
+        );
     }
     my $today_since_ad = Date_to_Days( $year, $month, $day );
-    if (defined($conf->{'budget_year'}) && defined($conf->{'budget_month'}) && defined($conf->{'budget_day'})){
-        $budget_date    = Date_to_Days( $conf->{'budget_year'}, $conf->{'budget_month'}, $conf->{'budget_day'} );
+    if (   defined( $conf->{'budget_year'} )
+        && defined( $conf->{'budget_month'} )
+        && defined( $conf->{'budget_day'} ) )
+    {
+        $budget_date = Date_to_Days(
+            $conf->{'budget_year'},
+            $conf->{'budget_month'},
+            $conf->{'budget_day'}
+        );
         DEBUG "Today is   : $today_since_ad";
         DEBUG "Service    : $service_since_ad";
         DEBUG "Budget Day : $budget_date";
@@ -316,15 +467,15 @@ if ( $dataref->{$hostname} ) {
     my $warndays     = $conf->{'warning'} * 7;
     my $criticaldays = $conf->{'critical'} * 7;
     use integer;
-    my $weeks = $difference / 7;
-    my $budget_day_override=0;
-    if ( $today_since_ad >= $budget_date ){
-        $budget_day_override=1;
+    my $weeks               = $difference / 7;
+    my $budget_day_override = 0;
+    if ( $today_since_ad >= $budget_date ) {
+        $budget_day_override = 1;
     }
     DEBUG
         "Difference:$difference; Warndays:$warndays; Criticaldays:$criticaldays;";
 
-    if ( ! $conf->{'ignore'} ){
+    if ( !$conf->{'ignore'} ) {
         if ( $difference > $warndays ) {
             $ret_str = "OK: " . $weeks . " weeks left";
             $error   = "OK";
@@ -335,30 +486,33 @@ if ( $dataref->{$hostname} ) {
                     = "CRITICAL: hardware is out of maintenance since "
                     . abs($weeks)
                     . " weeks";
-                if ( $budget_day_override ){
-    	            $error = "CRITICAL";
-                } 
+                if ($budget_day_override) {
+                    $error = "CRITICAL";
+                }
                 else {
-                        DEBUG "State is critical, but we did not reach the budget day";
-                        $error = "OK";
+                    DEBUG
+                        "State is critical, but we did not reach the budget day";
+                    $error = "OK";
                 }
             }
             else {
                 $ret_str = "CRITICAL: only " . $weeks . " weeks left";
-                if ( $budget_day_override ){
-                    $error   = "CRITICAL";
-                } else {
+                if ($budget_day_override) {
+                    $error = "CRITICAL";
+                }
+                else {
                     $error = "OK";
                 }
             }
         }
         elsif ( $difference < $warndays ) {
             $ret_str = "WARNING: only " . $weeks . " weeks left";
-            if ( $budget_day_override ){
-                $error   = "WARNING";
+            if ($budget_day_override) {
+                $error = "WARNING";
             }
             else {
-                DEBUG "State is warning, but we did not reach the budget day";
+                DEBUG
+                    "State is warning, but we did not reach the budget day";
                 $error = "OK";
             }
         }
@@ -368,12 +522,14 @@ if ( $dataref->{$hostname} ) {
         }
     }
     else {
-        $ret_str = "OK: ignored maintenance information on special request (-i)";
-        $error   = "OK";
+        $ret_str
+            = "OK: ignored maintenance information on special request (-i)";
+        $error = "OK";
     }
 
     $ret_str
-        .= ";\nLast Service Date: " . $dataref->{$hostname}->{'last_date'};
+        .= ";\nLast Service Date: "
+        . $dataref->{$hostname}->{'last_date'};
     if (   ( defined $dataref->{$hostname}->{'vendor'} )
         && ( $dataref->{$hostname}->{'vendor'} ne "" ) )
     {
@@ -389,10 +545,13 @@ if ( $dataref->{$hostname} ) {
     {
         $ret_str .= ";\n" . $dataref->{$hostname}->{'inventory'};
     }
-    if ( defined($conf->{'budget_day'}) && "$conf->{'budget_day'}" ne "01.01.1970" ){
-        $ret_str .= ";\nBudget day: ".$conf->{'budget_date'};
+    if ( defined( $conf->{'budget_day'} )
+        && "$conf->{'budget_day'}" ne "01.01.1970" )
+    {
+        $ret_str .= ";\nBudget day: " . $conf->{'budget_date'};
     }
-    $ret_str .= ";\n" . $dataref->{$hostname}->{'comment'} if defined($dataref->{$hostname}->{'comment'});
+    $ret_str .= ";\n" . $dataref->{$hostname}->{'comment'}
+        if defined( $dataref->{$hostname}->{'comment'} );
     print "$ret_str\n";
     $exitcode = $ERRORS{$error};
     alarm(0);
@@ -416,12 +575,20 @@ in service.
 
 ./check_maintenance -H $HOSTNAME$ -w8 -c4 -f <file_with_maintenance_data>
 
+or
+
+./check_maintenance -H $HOSTNAME$ -w8 -c4 -m <file_with_database_information>
+
  Options:
     -H <HOSTNAME>    | --hostname <HOSTNAME>
     -w <int>         | --warning <int>
     -c <int>         | --critical <int>
+
     -f <file>        | --file <file>
+    -m <file>        | --mysql <file>
+
     -b <date>        | --budget_date <date>
+
     
     -i               | --ignore
     -h               | --help
@@ -476,6 +643,25 @@ B<Vendor> is not required, it is currently just an additional output value for t
 All lines without '|' will result in a warning. Best way to mark a line as 
 comment is a '#' at the beginning, this allows further improvements in the future.
 
+=item B<--mysql> F<file>
+
+Read all data from a MySQL database (currently only RackTables >= 0.20.10 is supported). The file contains the login 
+data for the MySQL database. The standard place/name should be /etc/monitoring-plugins/check_maintenance.ini.
+
+Example:
+
+=over 8
+
+ MYSQL_USER=maint_checker
+
+ MYSQL_DB=racktables_db
+
+ MYSQL_PASS=r@ckta8les
+
+ MYSQL_HOST=localhost
+
+=back
+
 =item B<--budget_day> F<date>
 
 Instead of issuing a warning/critical once the machine is running out of service, 
@@ -513,11 +699,11 @@ or inventory number of the host.
 
 =head1 AUTHORS
 
-Written by Lars Vogdt <Lars.Vogdt@novell.com>
+Written by Lars Vogdt <Lars.Vogdt@suse.com>
 
 =head1 SUPPORT
 
-Please use https://bugzilla.novell.com to submit patches or suggest improvements.
+Please use https://bugzilla.suse.com to submit patches or suggest improvements.
 
 Include version information with all correspondence (when possible use output from 
 the --version option of the plugin itself).
