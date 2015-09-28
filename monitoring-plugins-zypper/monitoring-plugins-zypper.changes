@@ -1,4 +1,20 @@
 -------------------------------------------------------------------
+Mon Sep 28 15:18:21 UTC 2015 - lars@linux-schulserver.de
+
+- run a simple test during %%check
+
+-------------------------------------------------------------------
+Thu Aug 20 12:20:47 UTC 2015 - lars@linux-schulserver.de
+
+- also include the local changes file in some subprofiles, so people
+  can overwrite the settings there (bnc #914493)
+- Update to 1.83:
+  + Tumbleweed is a rolling release - so asume it is not outdated 
+    at any time. Need to be clarified if we should check actively if
+    the installed Tumbleweed is outdated or not. Maybe we can use 
+    /etc/products.d/baseproduct to check for end-of-life information?
+
+-------------------------------------------------------------------
 Tue Mar  3 12:47:22 UTC 2015 - lars@linux-schulserver.de
 
 - allow to open /var/lib/YaST2/cookies in zypp-refresh

@@ -38,6 +38,7 @@ Recommends:     apparmor-parser
 %endif
 Requires:       zypper
 BuildArch:      noarch
+BuildRequires:  distribution-release
 BuildRequires:  nagios-rpm-macros
 Provides:       nagios-plugins-zypper = %{version}-%{release}
 Obsoletes:      nagios-plugins-zypper < %{version}-%{release}
@@ -76,6 +77,14 @@ EOF
 %else
 install -D -m644 %{SOURCE1} %{buildroot}%{_sysconfdir}/apparmor/profiles/extras/usr.lib.nagios.plugins.check_zypper
 %endif
+
+%check
+# generic test if check_zypper is working at all
+%buildroot/%{nagios_plugindir}/check_zypper --help
+if [ "$?" != "0" ]; then
+    echo "Test failed: check_zypper can not print help text" >&2
+    exit 1
+fi
 
 %clean
 rm -rf %buildroot

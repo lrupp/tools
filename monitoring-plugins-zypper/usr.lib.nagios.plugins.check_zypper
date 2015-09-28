@@ -28,6 +28,9 @@
   profile zypp-refresh-wrapper {
     #include <abstractions/base>
     #include <abstractions/nameservice>
+    # if you have additional changes, please add them in the file
+    # /etc/apparmor.d/local/usr.lib.nagios.plugins.check_zypper
+    #include <local/usr.lib.nagios.plugins.check_zypper.zypp_refresh>
     capability setuid,
     capability setgid,
     /usr/sbin/zypp-refresh-wrapper rmix,
@@ -39,12 +42,12 @@
     #include <abstractions/consoles>
     #include <abstractions/user-tmp>
     #include <abstractions/zypp>
+    # if you have additional changes, please add them in the file
+    # /etc/apparmor.d/local/usr.lib.nagios.plugins.check_zypper
+    #include <local/usr.lib.nagios.plugins.check_zypper.zypp_refresh>
 
     /var/log/zypp-refresh.log w,
     /usr/sbin/zypp-refresh rmix,
-
-    # if you have a local repository mirrored, please add the path to the direcory in the file
-    # /etc/apparmor.d/local/usr.lib.nagios.plugins.check_zypper
 
     /bin/cp rix,
     /bin/bash rix,
@@ -60,6 +63,9 @@
     #include <abstractions/consoles>
     #include <abstractions/user-tmp>
     #include <abstractions/nameservice>
+    # if you have additional changes, please add them in the file
+    # /etc/apparmor.d/local/usr.lib.nagios.plugins.check_zypper
+    #include <local/usr.lib.nagios.plugins.check_zypper.zypp_refresh>
 
     /usr/bin/repo2solv.sh      rmix,
     /usr/bin/repomdxml2solv     rix,
@@ -90,6 +96,9 @@
   }
   profile gpg {
     #include <abstractions/base>
+    # if you have additional changes, please add them in the file
+    # /etc/apparmor.d/local/usr.lib.nagios.plugins.check_zypper
+    #include <local/usr.lib.nagios.plugins.check_zypper.zypp_refresh>
     capability ipc_lock,
     /usr/bin/gpg2 rmix,
     /proc/sys/crypto/fips_enabled r,
@@ -105,6 +114,9 @@
     #include <abstractions/zypp>
     #include <abstractions/consoles>
     #include <abstractions/nameservice>
+    # if you have additional changes, please add them in the file
+    # /etc/apparmor.d/local/usr.lib.nagios.plugins.check_zypper
+    #include <local/usr.lib.nagios.plugins.check_zypper.zypp_refresh>
 
     /bin/bash rix,
     /usr/bin/rpmdb2solv         rix,
@@ -121,6 +133,9 @@
     #include <abstractions/base>
     #include <abstractions/rpm>
     #include <abstractions/nameservice>
+    # if you have additional changes, please add them in the file
+    # /etc/apparmor.d/local/usr.lib.nagios.plugins.check_zypper
+    #include <local/usr.lib.nagios.plugins.check_zypper.zypp_refresh>
     /bin/rpm rmix,
   }
 

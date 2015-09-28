@@ -1,10 +1,11 @@
 #!/usr/bin/perl -w
 # nagios: -epn
 #
-# check_zypper - nagios plugin
+# check_zypper - monitoring plugin
 #
 # Copyright (C) 2008-2010, Novell, Inc.
-# Copyright (C) 2011-2013, SUSE Linux Products GmbH
+# Copyright (C) 2011-2014, SUSE Linux Products GmbH
+# Copyright (C) 2015, SUSE Linux GmbH
 # Author: Lars Vogdt
 #
 # All rights reserved.
@@ -35,8 +36,6 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-# $Id$
-#
 
 use strict;
 use warnings;
@@ -50,11 +49,11 @@ $ENV{'ENV'}      = '';
 
 # constants
 $PROGNAME = "check_zypper";
-$VERSION  = '1.82';
+$VERSION  = '1.90';
 $DEBUG    = 0;
 
 # variables
-our ( $opt_V, $opt_h, $opt_i, $opt_w, $opt_c, $opt_f, $opt_l, $opt_o, $opt_p, $opt_r, $opt_s, $opt_t, $opt_u, $opt_v );
+our ( $opt_V, $opt_h, $opt_i, $opt_w, $opt_c, $opt_f, $opt_l, $opt_o, $opt_p, $opt_r, $opt_s, $opt_t, $opt_u, $opt_v, $support_only);
 our $zypper          = '/usr/bin/zypper';
 our $zypperopt       = '--non-interactive --no-gpg-checks xml-updates';
 our $sudo            = '/usr/bin/sudo';
@@ -62,6 +61,7 @@ our $zypp_refresh    = '/usr/sbin/zypp-refresh';
 our $refresh_wrapper = '/usr/sbin/zypp-refresh-wrapper';
 our $use_sudo        = 'unset LANG; ';
 our $releasefile     = '/etc/SuSE-release';
+our $productfile     = '/etc/products.d/baseproduct';
 our $rpm             = '/bin/rpm';
 our $awk             = '/bin/awk';
 our $grep            = '/bin/grep';
@@ -89,6 +89,7 @@ our %REVERSE = (
 our %supported_release = (
     'openSUSE' => [ '12.3', '13.1', '13.2', '13.3' ],
     'SLE'      => [ '10.4', '11.3', '11.4', '12.0', '12.1' ],
+	'Tumbleweed' => [ '2015*' ],
 );
 $opt_w = 'recommended,optional,unsupported,local_package';
 $opt_c = 'security';
@@ -110,7 +111,7 @@ sub print_myrevision ($$) {
 }
 
 sub mysupport () {
-    print "Please use https://bugzilla.novell.com to submit patches or suggest improvements.\n";
+    print "Please use https://bugzilla.suse.com to submit patches or suggest improvements.\n";
     print "Please include version information with all correspondence (when possible,\n";
     print "use output from the --version option of the plugin itself).\n";
 }
@@ -136,6 +137,9 @@ sub get_distribution($) {
         elsif (/^openSUSE/){
             $dist{'name'} = 'openSUSE';
         }
+		elsif (/^CODENAME\s+=\s+Tumbleweed/){
+			$dist{'name'} = 'Tumbleweed';
+		}
         if (/^VERSION/) {
             my ($version) = $_ =~ m/VERSION = (.*)/;
             $dist{'version'}=trim($version);
@@ -147,6 +151,23 @@ sub get_distribution($) {
     }
     close(RELEASE);
     return ( \%dist );
+}
+
+sub endoflife($){
+    my ($file) = @_;
+	my $eol='1970-01-01';
+    if (-r "$file"){
+	    open(PRODFILE, "<$file") || warn("Could not open $file\n");
+		while (<PRODFILE>){
+			chomp;
+			if (/<endoflife>(.*)<\/endoflife>/){
+			   $eol=$1;
+			}
+		}
+	}
+	my ($d, $m, $y) = (localtime(time()))[3,4,5];
+	my $year=1900+$y;
+    print STDERR "INFO: Current: $year-$m-$d; End of life: $eol\n" if ($DEBUG);
 }
 
 sub print_usage () {
@@ -222,11 +243,15 @@ sub print_usage () {
     print "\n";
     print "  -d, --debug\n";
     print "      Print debug output to STDERR\n";
+    print "\n";
+	print "  --support-only\n";
+	print "      Just check if the running distribution is supported.\n";
 }
 
 sub print_help {
     my $exit = shift || undef;
-    print "Copyright (c) 2009-2014, Novell, Inc.\n\n";
+    print "Copyright (c) 2009-2014, Novell, Inc.\n";
+    print "Copyright (c) 2015, SUSE Linux GmbH\n\n";
     print_usage();
     print "\n";
     mysupport();
@@ -400,7 +425,7 @@ sub check($) {
             return ( 'UNKNOWN: ' . xml_re_escape($_), 'UNKNOWN' ) if (/Error message:/);
             return ( 'UNKNOWN: ' . xml_re_escape($_), 'UNKNOWN' ) if (/A ZYpp transaction is already in progress./);
             return ( 'UNKNOWN: ' . xml_re_escape($_), 'UNKNOWN' ) if (/System management is locked/);
-            if ((/Repository.*is out-of-date/) || (/Repository.*outdated/)) {
+            if ((/Repository.*is out-of-date.*/) || (/Repository.*outdated/)) {
                 print STDERR "WARNING: possibly outdated repository found\n" if ($DEBUG);
                 if ( !$opt_o ) {
                     $error   = check_errorcode('security');
@@ -553,8 +578,8 @@ sub check($) {
             }
         }
         else {
-            $error   = "OK";
-            $ret_str = "no updates available ";
+            $error   = check_errorcode('OK');
+            $ret_str .= "${warnstr}no updates available ";
             if ($opt_v) {
                 $ret_str .= "\nIgnored Patches : " . join( ' ', @patchignore ) . " "   if @patchignore;
                 $ret_str .= "\nIgnored Packages: " . join( ' ', @packageignore ) . " " if @packageignore;
@@ -624,6 +649,7 @@ GetOptions(
     "verbose_output"  => \$opt_v,
     "s"               => \$opt_s,
     "use_sudo"        => \$opt_s,
+	"support-only"    => \$support_only,
 ) or print_help(2);
 
 $TIMEOUT = $opt_t if ($opt_t);
@@ -671,6 +697,7 @@ if ( "$dist->{'name'}" eq "SLE" ) {
 
 $use_sudo .= "$sudo" if ($opt_s);
 
+# needs to stay here to provide the correct information in the --help output
 if ($opt_h) {
     print_help();
     exit $ERRORS{'OK'};
@@ -717,6 +744,8 @@ if ($opt_i) {
     }
 }
 
+alarm(0);
+
 if ($opt_r) {
     my ( $ret_str, $error ) = refresh_zypper($dist);
     if ($error) {
@@ -725,7 +754,11 @@ if ($opt_r) {
     }
 }
 
-alarm(0);
+if ($support_only){
+    print STDERR "Checking only supported distribution status\n";
+	exit 0;
+}
+
 
 if ( check_zypper() ) {
     print "Updates UNKNOWN - system does not allow to execute zypper\n";
@@ -733,7 +766,12 @@ if ( check_zypper() ) {
 }
 else {
     my ( $ret_str, $error ) = check($dist);
-    if ( grep {/\Q$dist->{'name'}\E/} keys %supported_release ) {
+	if ($dist->{'name'} eq "Tumbleweed"){
+		print STDERR "INFO: found Tumbleweed $version_release in \%supported_release\n";
+		print STDERR "INFO: without parsing http://download.opensuse.org/tumbleweed/repo/oss/media.1/media I can not say more\n";
+		print STDERR "INFO: at the moment. So a FIXME for the script - but until then, don't be evil and say OK.\n";
+	}
+    elsif ( grep {/\Q$dist->{'name'}\E/} keys %supported_release ) {
         print STDERR "INFO: found $dist->{'name'} - checking supportstatus\n" if ($DEBUG);
         if ( grep {/\Q$version_release\E/} @{ $supported_release{$dist->{'name'}} } ) {
             print STDERR "INFO: found $version_release for $dist->{'name'} in \%supported_release - OK\n" if ($DEBUG);
