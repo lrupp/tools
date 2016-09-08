@@ -24,6 +24,7 @@ License:        BSD-3-Clause
 Group:          System/Monitoring
 Url:            https://github.com/lrupp/tools/tree/master/monitoring-plugins-sks_keyserver
 Source0:        check_sks_keyserver
+Source1:        README.md
 %if 0%{?suse_version}
 BuildRequires:  nagios-rpm-macros
 %else
@@ -36,7 +37,7 @@ Requires:       perl(JSON)
 Requires:       perl(JSON::Parse)
 # older RH distributions do not have weak dependencies
 # let them require the packages instead to be sure it works
-%if ( %{defined rhel_version} && 0%{?rhel_version} <= 7 ) || ( %{defined fedora_version} && 0%{?fedora_version} <= 20 ) || ( %{defined centos_version} && 0%{?centos_version} <= 7 )
+%if ( %{defined rhel_version} && 0%{?rhel_version} <= 700 ) || ( %{defined fedora_version} && 0%{?fedora_version} <= 20 ) || ( %{defined centos_version} && 0%{?centos_version} <= 700 )
 Requires:       perl(Data::Dumper)
 Requires:       perl
 %else
@@ -70,13 +71,15 @@ install -D -m755 %{SOURCE0} %{buildroot}%{nagios_plugindir}/check_sks_keyserver
 %if ! 0%{?suse_version}
 sed -i "s|/usr/lib/nagios/plugins|%{_libdir}/nagios/plugins|g" %{buildroot}%{nagios_plugindir}/check_sks_keyserver
 %endif
-
+install -D -m644 %{SOURCE1} %{buildroot}%{_defaultdocdir}/%{name}/README
 
 %clean
 rm -rf %{buildroot}
 
 %files
 %defattr(-,root,root)
+%dir %{_defaultdocdir}/%{name}
+%{_defaultdocdir}/%{name}/*
 # avoid build dependecy of nagios - own the dirs
 %dir %{nagios_libdir}
 %dir %{nagios_plugindir}
