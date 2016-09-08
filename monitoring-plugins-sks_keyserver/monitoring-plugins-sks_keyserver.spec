@@ -24,14 +24,26 @@ License:        BSD-3-Clause
 Group:          System/Monitoring
 Url:            http://en.opensuse.org/monitoring-plugins-sks_keyserver
 Source0:        check_sks_keyserver
+%if 0%{?suse_version}
 BuildRequires:  nagios-rpm-macros
+%else
+%define         nagios_libdir %{_libdir}/nagios
+%define         nagios_plugindir %{nagios_libdir}/plugins
+%endif
 Requires:       perl(Getopt::Long)
 Requires:       perl(LWP)
 Requires:       perl(JSON)
 Requires:       perl(JSON::Parse)
+# older RH distributions do not have weak dependencies
+# let them require the packages instead to be sure it works
+%if ( %{defined rhel_version} && 0%{?rhel_version} <= 7 ) || ( %{defined fedora_version} && 0%{?fedora_version} <= 20 ) || ( %{defined centos_version} && 0%{?centos_version} <= 7 )
+Requires:       perl(Data::Dumper)
+Requires:       perl
+%else
 Recommends:     perl(Data::Dumper)
 # nagios can execute the script with embedded perl
 Recommends:     perl
+%endif
 BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 BuildArch:      noarch
 
@@ -55,6 +67,10 @@ to see your server connected to at any time.
 #
 %install
 install -D -m755 %{SOURCE0} %{buildroot}%{nagios_plugindir}/check_sks_keyserver
+%if ! 0%{?suse_version}
+sed -i "s|/usr/lib/nagios/plugins|%{_libdir}/nagios/plugins|g" %{buildroot}%{nagios_plugindir}/check_sks_keyserver
+%endif
+
 
 %clean
 rm -rf %{buildroot}
