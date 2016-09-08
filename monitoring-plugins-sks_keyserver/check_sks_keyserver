@@ -1,0 +1,224 @@
+#!/usr/bin/perl -w
+# nagios: -epn
+#
+# check_sks_keyserver
+#
+# Copyright (C) 2016, SUSE Linux GmbH
+# Author: Lars Vogdt
+#
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# * Redistributions of source code must retain the above copyright notice, this
+#   list of conditions and the following disclaimer.
+#
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+#
+# * Neither the name of the Novell nor the names of its contributors may be
+#   used to endorse or promote products derived from this software without
+#   specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+use strict;
+use warnings;
+use lib "/usr/lib/nagios/plugins";
+use utils qw{$TIMEOUT %ERRORS print_revision};
+use Getopt::Long;
+use LWP;
+use JSON;
+use JSON::Parse 'valid_json';
+
+our $warn=3;
+our $crit=1;
+our $hostname='';
+our $rev=0;
+our $help=0;
+our $debug=0;
+our $list_peers=0;
+our $version="0.1";
+our $url='https://sks-keyservers.net/status/ks-status-json.php?server=';
+our $exitcode=0;
+
+our $DEBUG=0;
+
+our %ERRORS           = (
+    'OK'        => 0,
+    'WARNING'   => 1,
+    'CRITICAL'  => 2,
+    'UNKNOWN'   => 3,
+    'DEPENDENT' => 4,
+);
+our %REVERSE = (
+    4 => 'DEPENDENT',
+    3 => 'UNKNOWN',
+    2 => 'CRITICAL',
+    1 => 'WARNING',
+    0 => 'OK',
+);
+
+
+sub get_url($){
+	my ($url)=@_;
+	my $browser = LWP::UserAgent->new;
+	my $response = $browser->get("$url");
+	return $response;
+}
+
+sub print_usage {
+    print "This plugin checks the status of a sks keyserver entry on sks-keyservers.net.\n";
+    print "You need to provide the FQDN of the sks keyserver that should be checked.\n\n";
+    print "Usage:  ./check_sks_keyserver -H <hostname>  [OPTIONS]\n\n";
+    print "Required option:\n";
+    print "          -H|--hostname <FQDN> : FQDN of the host to be checked\n\n";
+    print "Options:\n";
+    print "          -w|--warning         : warn, if not more than this amount of peers is in OK state (default: $warn)\n";
+    print "          -c|--critical        : expect at least this amount of peers in OK state (default: $crit)\n";
+    print "          -p|--peer            : print information about the connected peers\n";
+    print "          -t|--timeout         : timeout (default: $TIMEOUT) for the plugin itself\n";
+    print "          -v|--version         : print version information\n";
+    print "          -h|--help            : this help\n";
+}
+
+sub print_help {
+        my $exitcode=shift || 1;
+        print "Copyright (c) 2016, SUSE Linux GmbH.\n\n";
+        print_usage();
+        print "\n";
+        exit $exitcode;
+}
+
+sub print_error {
+        my $error=shift || '';
+        print STDERR "\nERROR: $error\n\n";
+        &print_usage;
+        exit $ERRORS{'UNKNOWN'};
+}
+
+Getopt::Long::Configure('bundling');
+if(!GetOptions( 'w|warning=i'  => \$warn,
+                'c|critical=i' => \$crit,
+                'H|hostname=s' => \$hostname,
+                't|timeout=i'  => \$TIMEOUT,
+                'p|peer'       => \$list_peers,
+                'h|help'       => \$help,
+                'v|version'    => \$rev,
+                'd|debug'      => \$debug,
+  )){
+  &print_help(1);
+}
+&print_help(0) if ($help);
+if ($rev){
+        &print_revision('check_sks_keyserver',$version);
+        exit $ERRORS{'UNKNOWN'};
+}
+# Just in case of problems, let's not hang Nagios
+$SIG{'ALRM'} = sub {
+    print "UNKNOWN - Plugin timed out\n";
+    exit $ERRORS{'UNKNOWN'};
+};
+alarm($TIMEOUT);
+
+print_error("warning must be greater than 0") if ($warn <= 0);
+print_error("critical must be greater than 0") if ($crit <= 0);
+print_error("critical ($crit) must be lower than warning ($warn)") if ($crit >= $warn);
+print_error("Please provide at least a FQDN") if (!defined($hostname) || ("$hostname" eq ""));
+
+if ($debug){
+	print STDERR "Checking URL: ${url}${hostname}\n";
+}
+
+my $result=get_url("${url}${hostname}");
+
+if ($debug){
+	use Data::Dumper;
+	print Data::Dumper->Dump([$result])."\n";
+}
+
+if (valid_json ($result->{'_content'})){
+	my $content = decode_json $result->{'_content'};
+	my $output='';
+
+	# first: count the peers and check if we reach the alarms already
+	my $peerlist='';
+	my $good_peer=0;
+	my $bad_peer=0;
+
+	foreach my $peer (@{$content->{'Peers'}}){
+		if ($peer->{'last_status'}){
+			$peerlist.="Peer: ".$peer->{'hostname'}." - Status: ok";
+			$good_peer++;
+		}
+		else {
+			$peerlist.="Peer: ".$peer->{'hostname'}." - Status: NOT OK";
+			$bad_peer++;
+		}
+		$peerlist.="\n";
+	}
+
+	if ($good_peer <= $warn){
+		$output="WARNING: Only $good_peer good peers found; ";
+		$exitcode=2;
+	}
+
+	if ($good_peer <= $crit){
+		$output="CRITICAL: Only $good_peer good peers found; ";
+		$exitcode=1;
+	}
+
+	if (defined($content->{'Last_status'}) && "$content->{'Last_status'}" eq "OK"){
+		$output .= "OK: Keyserver is in the pool; ";
+	}
+	else {
+		if (defined($content->{'Last_status'})){
+			print "CRITICAL: Keyserver is not in the pool - status is ".$content->{'Last_status'}."; ";
+		} 
+		else {
+			print "UNKOWN: Keyserver is not in the pool - got no status information for host: $hostname; ";
+			exit 3;
+		}
+		$exitcode=1;
+	}
+	print "$output";
+	print "Last Update: ".$content->{'Last_Update'}."; " if (defined($content->{'Last_Update'}));
+	print "Last state change: ".$content->{'Last_status_change'}."; " if (defined($content->{'Last_status_change'}));
+	print "Reason: ".$content->{'Last_status_reason'}.";" if (defined($content->{'Last_status_reason'}));
+
+	# generate some statistics (Perfdata)
+	print " | ";
+	print "keys=".$content->{'Keys'}."; " if (defined($content->{'Keys'}));
+	print "keys_diff=".$content->{'KeyDiff'}."; " if (defined($content->{'KeyDiff'}));
+	print "good_peers=$good_peer; ";
+	print "bad_peers=$bad_peer; ";
+	print "srv_eu=".$content->{'SRV_EU'}."; " if (defined($content->{'SRV_EU'}));
+	print "srv_oc=".$content->{'SRV_OC'}."; " if (defined($content->{'SRV_OC'}));
+	print "srv_na=".$content->{'SRV_NA'}."; " if (defined($content->{'SRV_NA'}));
+	print "srv_sa=".$content->{'SRV_SA'}."; " if (defined($content->{'SRV_SA'}));
+	print "\n";
+
+	# print list of peers, if requested
+	if ($list_peers){
+		print "$peerlist";
+	}
+}
+else {
+	print "CRITICAL: no valid JSON provided at https://sks-keyservers.net/status/ks-status-json.php?server=$hostname\n";
+	$exitcode=1;
+}
+
+exit $exitcode;
+
