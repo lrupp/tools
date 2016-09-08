@@ -22,7 +22,7 @@ Release:        0
 Summary:        Check the status of a sks keyserver entry
 License:        BSD-3-Clause
 Group:          System/Monitoring
-Url:            http://en.opensuse.org/monitoring-plugins-sks_keyserver
+Url:            https://github.com/lrupp/tools/tree/master/monitoring-plugins-sks_keyserver
 Source0:        check_sks_keyserver
 %if 0%{?suse_version}
 BuildRequires:  nagios-rpm-macros
