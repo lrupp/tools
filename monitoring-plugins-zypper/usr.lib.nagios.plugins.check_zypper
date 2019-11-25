@@ -9,12 +9,13 @@
   #include <abstractions/wutmp>
 
   /etc/SuSE-release r,
+  /etc/os-release r,
 
   /{,usr/}bin/grep  rix,
   /{,usr/}bin/awk   rix,
   /{,usr/}bin/gawk  rix,
-  /bin/rpm px -> /usr/lib/nagios/plugins/check_zypper//rpm,
-  /bin/bash rix,
+  /{,usr/}bin/rpm px -> /usr/lib/nagios/plugins/check_zypper//rpm,
+  /{,usr/}bin/bash rix,
   /{,usr/}bin/sudo Ux,
 
   # as we do not know how people name the ignore file, we 
@@ -49,8 +50,8 @@
     /var/log/zypp-refresh.log w,
     /usr/sbin/zypp-refresh rmix,
 
-    /bin/cp rix,
-    /bin/bash rix,
+    /{usr/,}bin/cp rix,
+    /{usr/,}bin/bash rix,
     /usr/bin/rpmdb2solv         rix,
     /usr/bin/zypper px -> /usr/lib/nagios/plugins/check_zypper//zypper,
     /usr/bin/gpg2 px -> /usr/lib/nagios/plugins/check_zypper//gpg,
@@ -76,17 +77,17 @@
     /usr/bin/mergesolv          rix,
 
     /usr/bin/find               rix,
-    /bin/bash                   rix,
-    /bin/rm                     rix,
-    /bin/cat                    rix,
-    /bin/sed                    rix,
-    /bin/gzip                   rix,
-    /{,usr/}bin/grep            rix,
-    /{,usr/}bin/gzip            rix,
-    /{,usr/}bin/bzip2           rix,
-    /{,usr/}bin/lzma            rix,
-    /{,usr/}bin/xz              rix,
-    /bin/mktemp                 rix,
+    /{usr/,}bin/bash            rix,
+    /{usr/,}bin/rm                     rix,
+    /{usr/,}bin/cat                    rix,
+    /{usr/,}bin/sed                    rix,
+    /{usr/,}bin/gzip                   rix,
+    /{usr/,}bin/grep            rix,
+    /{usr/,}bin/gzip            rix,
+    /{usr/,}bin/bzip2           rix,
+    /{usr/,}bin/lzma            rix,
+    /{usr/,}bin/xz              rix,
+    /{usr/,}bin/mktemp                 rix,
 
     /var/cache/zypp/** rw,
   }
@@ -118,7 +119,7 @@
     # /etc/apparmor.d/local/usr.lib.nagios.plugins.check_zypper
     #include <local/usr.lib.nagios.plugins.check_zypper.zypp_refresh>
 
-    /bin/bash rix,
+    /{,usr/}bin/bash rix,
     /usr/bin/rpmdb2solv         rix,
     /usr/bin/zypper rmix,
     /usr/share/zypper/ r,
@@ -136,7 +137,7 @@
     # if you have additional changes, please add them in the file
     # /etc/apparmor.d/local/usr.lib.nagios.plugins.check_zypper
     #include <local/usr.lib.nagios.plugins.check_zypper.zypp_refresh>
-    /bin/rpm rmix,
+    /{usr/,}bin/rpm rmix,
   }
 
   # Site-specific additions and overrides. See local/README for details.

@@ -9,4 +9,5 @@
     /etc/rpm/ r,
     /etc/rpm/macros* r,
     /var/lib/rpm/** rlk,
+    /usr/lib/sysimage/rpm/** rlk,
 

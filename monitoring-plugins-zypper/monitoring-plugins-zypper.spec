@@ -1,7 +1,7 @@
 #
 # spec file for package monitoring-plugins-zypper
 #
-# Copyright (c) 2015 SUSE LINUX GmbH, Nuernberg, Germany.
+# Copyright (c) 2019 SUSE LINUX GmbH, Nuernberg, Germany.
 #
 # All modifications and additions to the file contributed by third parties
 # remain the property of their copyright owners, unless otherwise agreed
@@ -12,17 +12,23 @@
 # license that conforms to the Open Source Definition (Version 1.9)
 # published by the Open Source Initiative.
 
-# Please submit bugfixes or comments via http://bugs.opensuse.org/
+# Please submit bugfixes or comments via https://bugs.opensuse.org/
 #
 
+
+%if 0%{?suse_version} >= 1230
+%bcond_without systemd
+%else
+%bcond_with systemd
+%endif
 
 Name:           monitoring-plugins-zypper
 Summary:        Check for software updates via zypper
 License:        BSD-3-Clause
 Group:          System/Monitoring
-Version:        1.82
+Version:        1.98
 Release:        0
-Url:            http://en.opensuse.org/Monitoring-plugins-zypper
+URL:            http://en.opensuse.org/Monitoring-plugins-zypper
 Source0:        check_zypper.pl
 Source1:        usr.lib.nagios.plugins.check_zypper 
 Source2:        apparmor-abstractions-zypp
@@ -31,14 +37,33 @@ Source4:        apparmor-abstractions-rpm
 Requires:       gawk
 Requires:       grep
 Requires:       rpm
+%if 0%{?suse_version} > 1310
+BuildRequires:  sudo
+Requires:       sudo
+Source5:        sudo-profile-check_zypper
+%endif
 %if 0%{?suse_version} > 1010
 # nagios can execute the script with embedded perl
 Recommends:     perl 
 Recommends:     apparmor-parser
+BuildRequires:  apparmor-parser
+%if 0%{?suse_version} > 1320
+Requires:       apparmor-abstractions
+%else
+Requires:       apparmor-profiles
+%endif
 %endif
 Requires:       zypper
 BuildArch:      noarch
+%if 0%{?suse_version}
 BuildRequires:  distribution-release
+%endif
+%if %{with systemd}
+%if 0%{?suse_version} >= 1210
+BuildRequires:  systemd-rpm-macros
+%endif
+%{?systemd_requires}
+%endif
 BuildRequires:  nagios-rpm-macros
 Provides:       nagios-plugins-zypper = %{version}-%{release}
 Obsoletes:      nagios-plugins-zypper < %{version}-%{release}
@@ -70,12 +95,17 @@ install -D -m644 %{SOURCE4} %{buildroot}%{_sysconfdir}/apparmor.d/abstractions/r
 install -D -m644 %{SOURCE3} %{buildroot}%{_sysconfdir}/apparmor.d/abstractions/ssl
 install -D -m644 %{SOURCE2} %{buildroot}%{_sysconfdir}/apparmor.d/abstractions/zypp
 mkdir -p %{buildroot}%{_sysconfdir}/apparmor.d/local
-cat > %{buildroot}%{_sysconfdir}/apparmor.d/local/usr.lib.nagios.plugins.check_zypper << EOF
+for file in usr.lib.nagios.plugins.check_zypper.zypp_refresh usr.lib.nagios.plugins.check_zypper ; do
+cat > %{buildroot}%{_sysconfdir}/apparmor.d/local/$file << EOF
 # Site-specific additions and overrides for usr.lib.nagios.plugins.check_zypper
 # See /etc/apparmor.d/local/README for details.
 EOF
+done
 %else
 install -D -m644 %{SOURCE1} %{buildroot}%{_sysconfdir}/apparmor/profiles/extras/usr.lib.nagios.plugins.check_zypper
+%endif
+%if 0%{?suse_version} > 1310
+install -Dm400 %{SOURCE5} %{buildroot}%{_sysconfdir}/sudoers.d/check_zypper
 %endif
 
 %check
@@ -88,6 +118,23 @@ fi
 
 %clean
 rm -rf %buildroot
+
+%postun
+if [ "$YAST_IS_RUNNING" != "instsys" ]; then
+     if [ -x /sbin/apparmor_parser ]; then
+       %if %{with systemd}
+         if /usr/bin/systemctl is-active --quiet apparmor.service; then
+             /sbin/apparmor_parser -r -T -W  %{_sysconfdir}/apparmor.d/usr.lib.nagios.plugins.check_zypper &> /dev/null || :
+         fi
+       %else
+         if /etc/init.d/boot.apparmor status >/dev/null ; then 
+             /sbin/apparmor_parser -r -T -W  %{_sysconfdir}/apparmor.d/usr.lib.nagios.plugins.check_zypper &> /dev/null || :
+         fi
+       %endif
+     else
+         echo "Could not reload the Apparmor profile: /sbin/apparmor_parser is missing or not executable."
+     fi
+fi
 
 %files 
 %defattr(-,root,root)
@@ -103,6 +150,7 @@ rm -rf %buildroot
 %dir %{_sysconfdir}/apparmor.d/local
 %config %{_sysconfdir}/apparmor.d/usr.lib.nagios.plugins.check_zypper
 %config(noreplace) %{_sysconfdir}/apparmor.d/local/usr.lib.nagios.plugins.check_zypper
+%config(noreplace) %{_sysconfdir}/apparmor.d/local/usr.lib.nagios.plugins.check_zypper.zypp_refresh
 %else
 %dir %{_sysconfdir}/apparmor
 %dir %{_sysconfdir}/apparmor/profiles
@@ -110,5 +158,8 @@ rm -rf %buildroot
 %config(noreplace) %{_sysconfdir}/apparmor/profiles/extras/usr.lib.nagios.plugins.check_zypper
 %endif
 %{nagios_plugindir}/check_zypper
+%if 0%{?suse_version} > 1310
+%config(noreplace) %{_sysconfdir}/sudoers.d/check_zypper
+%endif
 
 %changelog
